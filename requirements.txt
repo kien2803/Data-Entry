@@ -1,0 +1,8 @@
+pymupdf
+google-genai
+openpyxl
+pydantic
+python-dotenv
+fastapi
+uvicorn[standard]
+python-multipart
