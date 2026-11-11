@@ -51,6 +51,26 @@ button { font: inherit; color: inherit; }
 .nav-item:hover { background: var(--raised); color: var(--text); }
 .nav-item[aria-current="page"] { background: var(--raised); color: var(--text); }
 .nav-item .pill { margin-left: auto; }
+/* collapse: slim icon rail */
+.collapse-btn { margin-left: auto; width: 22px; height: 22px; border: 0; background: none; color: var(--muted); cursor: pointer; border-radius: 4px; display: grid; place-items: center; }
+.collapse-btn:hover { background: var(--raised); color: var(--text); }
+.collapse-btn svg { width: 14px; height: 14px; }
+.sidebar { transition: width var(--t-ui) var(--ease-out); }
+.sidebar.collapsed { width: 56px; padding: 16px 10px; }
+.sidebar.collapsed .name, .sidebar.collapsed .workspace,
+.sidebar.collapsed .group-label, .sidebar.collapsed .lbl,
+.sidebar.collapsed .who, .sidebar.collapsed .pill { display: none; }
+.sidebar.collapsed .nav-item { justify-content: center; padding: 0; }
+.sidebar.collapsed .collapse-btn svg { transform: rotate(180deg); }
+.sidebar.collapsed .bottom { justify-content: center; }
+
+.btn.sm { height: 28px; padding: 0 10px; font-size: 13px; }
+.btn.sm.danger { color: var(--pill-negative-ink); }
+.btn.sm.danger:hover { background: var(--pill-negative-bg); }
+
+.tpl-desc { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+.tpl .fields { display: flex; gap: 6px; flex-wrap: wrap; }
+
 .sidebar .bottom { margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 10px 8px 0; border-top: 1px solid var(--border); }
 .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--raised); display: grid; place-items: center; font-size: var(--fs-small); font-weight: 500; color: var(--muted); }
 .bottom .who { font-size: var(--fs-small); }

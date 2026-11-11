@@ -237,6 +237,182 @@ async function download() {
   }
 }
 
+// ---------- views ----------
+
+const VIEWS = ["extract", "history", "templates", "settings"];
+const loaded = { history: false, templates: false, settings: false };
+
+function switchView(name) {
+  VIEWS.forEach(v => { $("view-" + v).hidden = v !== name; });
+  document.querySelectorAll(".nav-item[data-view]").forEach(a =>
+    a.setAttribute("aria-current", a.dataset.view === name ? "page" : "false"));
+  $("sidebar").classList.remove("open");
+  if (!loaded[name]) {
+    loaded[name] = true;
+    if (name === "history") loadHistory();
+    if (name === "templates") renderTemplates();
+    if (name === "settings") loadSettings();
+  } else if (name === "history") loadHistory();
+}
+
+// ---------- history ----------
+
+async function loadHistory() {
+  const body = $("historyBody");
+  try {
+    const res = await fetch("/history");
+    const j = await res.json();
+    if (!j.items.length) {
+      body.innerHTML = `<div class="empty">Chưa có chứng từ nào được xử lý.</div>`;
+      return;
+    }
+    const rows = j.items.map(r => `
+      <tr>
+        <td class="c">#${r.id}</td>
+        <td class="truncate" title="${esc(r.file_name)}">${esc(r.file_name)}</td>
+        <td>${r.mode || "—"}</td>
+        <td>${r.ok ? '<span class="pill pos">OK</span>' : '<span class="pill neg">Lỗi</span>'}</td>
+        <td class="r">${r.n_warnings || 0}</td>
+        <td>${(r.created_at || "").replace("T", " ").slice(0, 16)}</td>
+        <td class="r">
+          <button class="btn sm" data-act="open" data-id="${r.id}">Mở</button>
+          <button class="btn sm" data-act="xlsx" data-id="${r.id}">xlsx</button>
+          <button class="btn sm" data-act="retry" data-id="${r.id}">Thử lại</button>
+          <button class="btn sm danger" data-act="del" data-id="${r.id}">Xóa</button>
+        </td>
+      </tr>`).join("");
+    body.innerHTML = `<div class="table-wrap"><table class="items">
+      <thead><tr><th class="c">ID</th><th>File</th><th>Mode</th><th>Trạng thái</th>
+      <th class="r">Cảnh báo</th><th>Thời gian</th><th class="r">Hành động</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  } catch (e) {
+    body.innerHTML = `<div class="error-box"><b>Không tải được lịch sử</b>${esc(e.message)}</div>`;
+  }
+}
+
+$("historyBody").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  const id = b.dataset.id, act = b.dataset.act;
+  if (act === "xlsx") { location.href = `/history/${id}/xlsx`; return; }
+  if (act === "del") {
+    await fetch(`/history/${id}`, { method: "DELETE" });
+    loadHistory(); return;
+  }
+  if (act === "retry") {
+    b.disabled = true; b.textContent = "…";
+    await fetch(`/history/${id}/retry`, { method: "POST" });
+    loadHistory(); return;
+  }
+  if (act === "open") {
+    const res = await fetch(`/history/${id}`);
+    const d = await res.json();
+    if (!d.invoice) { switchView("history"); return; }
+    state.invoice = d.invoice; state.warnings = d.warnings;
+    state.effectiveMode = d.mode; state.sample = true; state.file = null;
+    $("dropzone").hidden = true; $("docWrap").hidden = false;
+    $("fileName").textContent = d.file_name;
+    $("docMeta").textContent = `#${d.id} · ${d.created_at.slice(0, 16)}`;
+    $("docview").innerHTML = `<img src="/history/${d.id}/preview.png" alt="">`;
+    renderResult();
+    $("finding").textContent =
+      `Đang xem lại extraction #${d.id} — dữ liệu đã lưu, không gọi AI.`;
+    switchView("extract");
+  }
+});
+
+// ---------- templates ----------
+
+function renderTemplates() {
+  const tpl = [
+    { name: "Hóa đơn GTGT (VAT)", status: "active",
+      desc: "Hóa đơn giá trị gia tăng điện tử — mẫu phổ biến nhất tại VN",
+      fields: ["Số hóa đơn", "Ký hiệu", "Ngày lập", "MST hai bên",
+               "Bảng hàng hóa", "Thuế GTGT", "Tổng thanh toán"] },
+    { name: "Phiếu thu / chi", status: "soon",
+      desc: "Chứng từ thu-chi nội bộ, quỹ tiền mặt", fields: [] },
+    { name: "Sao kê ngân hàng", status: "soon",
+      desc: "Bảng kê giao dịch tài khoản ngân hàng", fields: [] },
+    { name: "Đơn hàng / báo giá", status: "soon",
+      desc: "Đơn đặt hàng, báo giá, hợp đồng nguyên tắc", fields: [] },
+  ];
+  $("templatesBody").innerHTML = tpl.map(t => `
+    <section class="panel span6 tpl">
+      <header><h2>${esc(t.name)}</h2>
+        ${t.status === "active" ? '<span class="pill pos">Đang hỗ trợ</span>'
+                               : '<span class="pill">Sắp có</span>'}</header>
+      <p class="tpl-desc">${esc(t.desc)}</p>
+      ${t.fields.length ? `<div class="fields">${t.fields.map(
+        f => `<span class="pill">${esc(f)}</span>`).join("")}</div>` : ""}
+    </section>`).join("");
+}
+
+// ---------- settings ----------
+
+async function loadSettings() {
+  try {
+    const res = await fetch("/stats");
+    const s = await res.json();
+    $("statsMeta").textContent = s.last ? `Lần cuối: ${s.last.ts}` : "";
+    const modes = Object.entries(s.by_mode || {})
+      .map(([k, v]) => `${k}: ${v}`).join(" · ") || "—";
+    $("statsBody").innerHTML = `
+      <div class="kv">
+        <div class="k">Tổng lượt trích xuất</div><div class="v mono">${s.total}</div>
+        <div class="k">Thành công</div><div class="v mono">${s.ok}</div>
+        <div class="k">Thất bại</div><div class="v mono">${s.failed}</div>
+        <div class="k">Tỷ lệ thành công</div><div class="v mono">${s.success_rate ?? "—"}%</div>
+        <div class="k">Thời gian xử lý TB</div><div class="v mono">${s.avg_ms ? (s.avg_ms/1000).toFixed(1) + "s" : "—"}</div>
+        <div class="k">Theo chế độ</div><div class="v mono">${modes}</div>
+      </div>`;
+  } catch (e) {
+    $("statsBody").innerHTML =
+      `<div class="error-box"><b>Không tải được thống kê</b>${esc(e.message)}</div>`;
+  }
+}
+
+// defaults persisted locally — applied to next uploads
+const saved = JSON.parse(localStorage.getItem("doclift-settings") || "{}");
+if (saved.mode) { state.mode = saved.mode;
+  document.querySelectorAll("[data-mode]").forEach(x =>
+    x.setAttribute("aria-pressed", x.dataset.mode === saved.mode ? "true" : "false"));
+}
+if (saved.layout) { state.layout = saved.layout;
+  document.querySelectorAll("[data-layout]").forEach(x =>
+    x.setAttribute("aria-pressed", x.dataset.layout === saved.layout ? "true" : "false"));
+}
+["smode", "slayout"].forEach(attr =>
+  document.querySelectorAll(`[data-${attr}]`).forEach(b =>
+    b.addEventListener("click", () => {
+      const group = attr === "smode" ? "setMode" : "setLayout";
+      const val = b.dataset[attr];
+      if (attr === "smode") {
+        state.mode = val;
+        document.querySelectorAll("[data-mode]").forEach(x =>
+          x.setAttribute("aria-pressed", x.dataset.mode === val ? "true" : "false"));
+      } else {
+        state.layout = val;
+        document.querySelectorAll("[data-layout]").forEach(x =>
+          x.setAttribute("aria-pressed", x.dataset.layout === val ? "true" : "false"));
+      }
+      document.querySelectorAll(`#${group} button`).forEach(x =>
+        x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      localStorage.setItem("doclift-settings",
+        JSON.stringify({ mode: state.mode, layout: state.layout }));
+    })));
+
+// nav + collapse
+document.querySelectorAll(".nav-item[data-view]").forEach(a =>
+  a.addEventListener("click", () => switchView(a.dataset.view)));
+$("collapseBtn").addEventListener("click", () => {
+  const s = $("sidebar");
+  s.classList.toggle("collapsed");
+  localStorage.setItem("doclift-sidebar",
+    s.classList.contains("collapsed") ? "1" : "0");
+});
+if (localStorage.getItem("doclift-sidebar") === "1")
+  $("sidebar").classList.add("collapsed");
+
 // ---------- wiring ----------
 
 const dz = $("dropzone"), fi = $("fileInput");
