@@ -5,3 +5,4 @@ samples/
 .taste-skill/
 venv/
 *.xlsx
+logs/

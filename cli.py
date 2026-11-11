@@ -1,11 +1,13 @@
-"""CLI: python cli.py input.pdf -o output.xlsx"""
+"""CLI: python cli.py input.pdf -o output.xlsx [--mode auto|text|vision] [--layout template|flat]"""
 
 import argparse
-import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
-from pipeline import extract_invoice, write_excel
+from pipeline import extract_invoice, write_excel, write_excel_flat
+
+SEV_ICON = {"critical": "!!", "check": "! ", "info": "- "}
 
 
 def main():
@@ -14,6 +16,10 @@ def main():
     p.add_argument("input", help="Đường dẫn file PDF hoặc ảnh hóa đơn")
     p.add_argument("-o", "--output", help="File Excel đầu ra "
                    "(mặc định: <input>.xlsx)")
+    p.add_argument("--mode", default="auto",
+                   choices=["auto", "text", "vision"])
+    p.add_argument("--layout", default="template",
+                   choices=["template", "flat"])
     p.add_argument("--json", action="store_true",
                    help="In JSON kết quả ra stdout")
     args = p.parse_args()
@@ -24,19 +30,21 @@ def main():
     out = Path(args.output) if args.output else src.with_suffix(".xlsx")
 
     try:
-        invoice, warnings = extract_invoice(src)
+        result = extract_invoice(src, args.mode)
     except RuntimeError as e:
         sys.exit(str(e))
 
-    write_excel(invoice, warnings, out)
-    print(f"Đã xuất: {out}")
+    meta = {"file": str(src), "mode": result.mode,
+            "extracted_at": datetime.now().isoformat(timespec="seconds")}
+    writer = write_excel_flat if args.layout == "flat" else write_excel
+    writer(result.invoice, result.warnings, out, meta)
 
-    soft = [w for w in warnings if not w.startswith("mode=")]
-    for w in soft:
-        print(f"  [!] {w}")
+    print(f"Đã xuất: {out}  (mode={result.mode}, {result.duration_ms}ms)")
+    for w in result.warnings:
+        print(f"  [{SEV_ICON.get(w.severity, '?')}] {w.message}")
 
     if args.json:
-        print(invoice.model_dump_json(indent=2))
+        print(result.invoice.model_dump_json(indent=2))
 
 
 if __name__ == "__main__":

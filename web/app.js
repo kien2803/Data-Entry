@@ -1,12 +1,15 @@
-// DocLift — upload -> extract -> review -> download
+// DocLift — upload -> extract -> review/edit -> download
 
 const $ = (id) => document.getElementById(id);
 const fmt = new Intl.NumberFormat("vi-VN");
 
-const state = { file: null, invoice: null, warnings: [], mode: null, sample: false };
+const state = {
+  file: null, invoice: null, warnings: [],
+  mode: "auto",        // auto | text | vision
+  layout: "template",  // template | flat
+  sample: false, effectiveMode: null, durationMs: null,
+};
 
-const VND_FIELDS = new Set(["tong_tien_hang", "tien_thue", "tong_thanh_toan",
-  "don_gia", "thanh_tien"]);
 const KV_FIELDS = [
   ["Số hóa đơn", "so_hoa_don", "mono"],
   ["Ký hiệu", "ky_hieu", "mono"],
@@ -17,48 +20,75 @@ const KV_FIELDS = [
   ["Đơn vị mua", "ten_don_vi_mua"],
   ["MST bên mua", "ma_so_thue_mua", "mono"],
 ];
+const SEV_PILL = { critical: "neg", check: "warn", info: "" };
+const MODE_LABEL = { text: "Đọc text", vision: "Đọc ảnh", sample: "Dữ liệu mẫu" };
 const vnd = (n) => (n == null ? "—" : fmt.format(n));
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
+  c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const num = (v) => v == null || v === "" ? null
+  : parseFloat(String(v).replace(/[^\d.,-]/g, "").replace(/\./g, "").replace(",", "."));
 
 // ---------- render ----------
 
 function renderResult() {
-  const { invoice: inv, warnings, mode } = state;
+  const { invoice: inv, warnings } = state;
   const body = $("resultBody"), pills = $("statusPills");
 
-  const nWarn = warnings.length;
+  const nCrit = warnings.filter(w => w.severity === "critical").length;
+  const nCheck = warnings.filter(w => w.severity === "check").length;
   pills.innerHTML =
-    `<span class="pill">${mode === "vision" ? "Đọc ảnh" : mode === "sample" ? "Dữ liệu mẫu" : "Đọc text"}</span>` +
+    `<span class="pill">${MODE_LABEL[state.effectiveMode] || "—"}</span>` +
     `<span class="pill">${inv.items.length} dòng hàng</span>` +
-    (nWarn ? `<span class="pill warn">${nWarn} cảnh báo</span>`
-           : `<span class="pill pos">Tổng khớp · MST hợp lệ</span>`);
+    (nCrit ? `<span class="pill neg">${nCrit} lỗi quan trọng</span>` : "") +
+    (nCheck ? `<span class="pill warn">${nCheck} nên kiểm tra</span>` : "") +
+    (!nCrit && !nCheck
+      ? `<span class="pill pos">Tổng khớp · MST hợp lệ</span>` : "");
 
-  const warnHtml = nWarn
-    ? `<div class="warn-strip">${warnings.map(w => `<div>– ${esc(w)}</div>`).join("")}</div>`
-    : `<div class="ok-strip">Số liệu nhất quán: cộng hàng + thuế = tổng thanh toán.</div>`;
+  const grouped = { critical: [], check: [], info: [] };
+  warnings.forEach(w => (grouped[w.severity] || grouped.check).push(w));
+  let stripHtml = "";
+  if (grouped.critical.length)
+    stripHtml += `<div class="warn-strip crit">${grouped.critical.map(
+      w => `<div>– ${esc(w.message)}</div>`).join("")}</div>`;
+  if (grouped.check.length)
+    stripHtml += `<div class="warn-strip">${grouped.check.map(
+      w => `<div>– ${esc(w.message)}</div>`).join("")}</div>`;
+  if (grouped.info.length)
+    stripHtml += `<div class="warn-strip info">${grouped.info.map(
+      w => `<div>– ${esc(w.message)}</div>`).join("")}</div>`;
+  if (!warnings.length)
+    stripHtml = `<div class="ok-strip">Số liệu nhất quán: cộng hàng + thuế = tổng thanh toán.</div>`;
 
-  const kv = KV_FIELDS.map(([label, key, cls]) =>
-    `<div class="k">${label}</div><div class="v ${cls || ""}">${esc(fmtField(key, inv[key]))}</div>`
-  ).join("");
+  const unsure = new Set(inv.truong_can_kiem_tra || []);
+  const kv = KV_FIELDS.map(([label, key, cls]) => {
+    const flag = unsure.has(key) ? " unsure" : "";
+    const title = flag ? ` title="AI không chắc — hãy đối chiếu"` : "";
+    return `<div class="k">${label}</div>` +
+      `<div class="v ed ${cls || ""}${flag}" contenteditable${title}` +
+      ` data-field="${key}">${esc(inv[key] ?? "")}</div>`;
+  }).join("");
 
   const rows = inv.items.map((it, i) => `
     <tr>
       <td class="c">${i + 1}</td>
-      <td>${esc(it.ten_hang)}</td>
-      <td>${esc(it.don_vi_tinh)}</td>
-      <td class="r">${vnd(it.so_luong)}</td>
-      <td class="r">${vnd(it.don_gia)}</td>
-      <td class="r">${vnd(it.thanh_tien)}</td>
+      <td class="ed" contenteditable data-idx="${i}" data-key="ten_hang">${esc(it.ten_hang)}</td>
+      <td class="ed" contenteditable data-idx="${i}" data-key="don_vi_tinh">${esc(it.don_vi_tinh)}</td>
+      <td class="r ed" contenteditable data-idx="${i}" data-key="so_luong">${vnd(it.so_luong)}</td>
+      <td class="r ed" contenteditable data-idx="${i}" data-key="don_gia">${vnd(it.don_gia)}</td>
+      <td class="r ed" contenteditable data-idx="${i}" data-key="thanh_tien">${vnd(it.thanh_tien)}</td>
+      <td class="r ed" contenteditable data-idx="${i}" data-key="thue_suat">${it.thue_suat ?? ""}</td>
     </tr>`).join("");
 
   body.innerHTML = `
-    ${warnHtml}
+    ${stripHtml}
     <div class="kv">${kv}</div>
     <div class="table-wrap">
       <table class="items">
         <thead><tr>
           <th class="c" style="width:36px">STT</th><th>Tên hàng hóa, dịch vụ</th>
-          <th style="width:70px">ĐVT</th><th class="r" style="width:70px">SL</th>
+          <th style="width:70px">ĐVT</th><th class="r" style="width:60px">SL</th>
           <th class="r" style="width:110px">Đơn giá</th><th class="r" style="width:120px">Thành tiền</th>
+          <th class="r" style="width:60px">Thuế%</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -68,39 +98,35 @@ function renderResult() {
       <div class="trow"><span class="l">Thuế GTGT ${inv.thue_suat != null ? `(${inv.thue_suat}%)` : ""}</span><span class="n">${vnd(inv.tien_thue)}</span></div>
       <div class="trow grand"><span class="l">Tổng thanh toán</span><span class="n">${vnd(inv.tong_thanh_toan)} ₫</span></div>
     </div>
-    ${inv.so_tien_bang_chu ? `<div class="inwords">${esc(inv.so_tien_bang_chu)}</div>` : ""}`;
+    ${inv.so_tien_bang_chu ? `<div class="inwords">${esc(inv.so_tien_bang_chu)}</div>` : ""}
+    <div class="edit-hint">Bấm vào ô bất kỳ để sửa trước khi tải Excel</div>`;
 
-  const issues = nWarn ? `${nWarn} cảnh báo cần kiểm tra` : "không có cảnh báo";
+  const sev = nCrit ? `${nCrit} lỗi cần kiểm tra` :
+    nCheck ? `${nCheck} điểm nên đối chiếu` : "không có cảnh báo";
+  const dur = state.durationMs ? ` · ${(state.durationMs / 1000).toFixed(1)}s` : "";
   $("finding").textContent =
-    `Hóa đơn ${inv.so_hoa_don || "—"} · ${inv.items.length} dòng hàng · ${issues} · sẵn sàng tải Excel.`;
+    `Hóa đơn ${inv.so_hoa_don || "—"} · ${inv.items.length} dòng hàng · ${sev}${dur}.`;
   $("downloadBtn").disabled = false;
 }
 
-function fmtField(key, v) {
-  if (v == null || v === "") return "";
-  if (VND_FIELDS.has(key)) return fmt.format(v) + " ₫";
-  return String(v);
-}
+// ---------- inline editing (delegated) ----------
 
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"]/g,
-    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-}
-
-function setLoading(msg) {
-  $("resultBody").innerHTML =
-    `<div class="loading"><div class="bar"></div><div>${msg}</div></div>`;
-  $("statusPills").innerHTML = "";
-  $("downloadBtn").disabled = true;
-}
-
-function setError(title, detail) {
-  $("resultBody").innerHTML =
-    `<div class="error-box"><b>${esc(title)}</b>${esc(detail)}</div>`;
-  $("statusPills").innerHTML = `<span class="pill neg">Lỗi</span>`;
-  $("finding").textContent = "Trích xuất chưa thành công. Xem chi tiết bên dưới.";
-  $("downloadBtn").disabled = true;
-}
+const NUMERIC_ITEM_KEYS = new Set(["so_luong", "don_gia", "thanh_tien", "thue_suat"]);
+$("resultBody").addEventListener("input", (e) => {
+  const el = e.target;
+  if (!state.invoice) return;
+  const text = el.textContent.trim();
+  if (el.dataset.field) {
+    const key = el.dataset.field;
+    state.invoice[key] = key.startsWith("ma_so_thue") || key.endsWith("_hoa_don")
+      || key === "ky_hieu" || key === "ngay_lap" ? text : text;
+  } else if (el.dataset.idx != null && el.dataset.key) {
+    const it = state.invoice.items[+el.dataset.idx];
+    if (!it) return;
+    const k = el.dataset.key;
+    it[k] = NUMERIC_ITEM_KEYS.has(k) ? num(text) : text;
+  }
+});
 
 // ---------- document preview ----------
 
@@ -119,13 +145,29 @@ function showSampleDoc() {
   $("docWrap").hidden = false;
   $("fileName").textContent = "hoa_don_mau.pdf";
   $("docMeta").textContent = "File mẫu";
-  $("docview").innerHTML =
-    `<img src="/sample/preview.png" alt="Hóa đơn mẫu">`;
+  $("docview").innerHTML = `<img src="/sample/preview.png" alt="Hóa đơn mẫu">`;
 }
 
 function showExtractedPreview(b64) {
   if (b64) $("docview").innerHTML =
     `<img src="data:image/png;base64,${b64}" alt="Trang 1 chứng từ">`;
+}
+
+// ---------- states ----------
+
+function setLoading(msg) {
+  $("resultBody").innerHTML =
+    `<div class="loading"><div class="bar"></div><div>${msg}</div></div>`;
+  $("statusPills").innerHTML = "";
+  $("downloadBtn").disabled = true;
+}
+
+function setError(title, detail) {
+  $("resultBody").innerHTML =
+    `<div class="error-box"><b>${esc(title)}</b>${esc(detail)}</div>`;
+  $("statusPills").innerHTML = `<span class="pill neg">Lỗi</span>`;
+  $("finding").textContent = "Trích xuất chưa thành công. Xem chi tiết bên dưới.";
+  $("downloadBtn").disabled = true;
 }
 
 // ---------- flows ----------
@@ -134,11 +176,14 @@ async function handleFile(file) {
   state.file = file; state.sample = false;
   const url = URL.createObjectURL(file);
   showPreview(url, file.name, file.type);
-  setLoading("Đang đọc chứng từ…");
+  const modeHint = state.mode === "vision" || file.type !== "application/pdf"
+    ? "Đang đọc ảnh bằng AI — có thể mất 10–30 giây…" : "Đang đọc chứng từ…";
+  setLoading(modeHint);
   $("finding").textContent = `Đang trích xuất ${file.name}…`;
 
   const fd = new FormData();
   fd.append("file", file);
+  fd.append("mode", state.mode);
   try {
     const res = await fetch("/extract/json", { method: "POST", body: fd });
     if (!res.ok) {
@@ -146,7 +191,8 @@ async function handleFile(file) {
       throw new Error(j.detail || `Lỗi máy chủ (${res.status})`);
     }
     const j = await res.json();
-    state.invoice = j.invoice; state.warnings = j.warnings; state.mode = j.mode;
+    state.invoice = j.invoice; state.warnings = j.warnings;
+    state.effectiveMode = j.mode; state.durationMs = j.duration_ms;
     showExtractedPreview(j.preview_b64);
     renderResult();
   } catch (e) {
@@ -161,35 +207,34 @@ async function loadSample() {
   try {
     const res = await fetch("/sample");
     const j = await res.json();
-    state.invoice = j.invoice; state.warnings = j.warnings; state.mode = "sample";
+    state.invoice = j.invoice; state.warnings = j.warnings;
+    state.effectiveMode = "sample"; state.durationMs = null;
     renderResult();
   } catch (e) {
     setError("Không tải được mẫu", e.message);
   }
 }
 
-function download() {
-  if (state.sample) {
-    const a = document.createElement("a");
-    a.href = "/sample/xlsx"; a.download = "mau.xlsx"; a.click();
-    return;
-  }
-  if (!state.file) return;
+async function download() {
+  if (!state.invoice) return;
   setLoading("Đang tạo file Excel…");
-  const fd = new FormData();
-  fd.append("file", state.file);
-  fetch("/extract", { method: "POST", body: fd })
-    .then(async res => {
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Lỗi tạo Excel");
-      return res.blob();
-    })
-    .then(blob => {
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "ket_qua.xlsx"; a.click();
-      renderResult();
-    })
-    .catch(e => setError("Không tạo được Excel", e.message));
+  try {
+    const res = await fetch("/export/xlsx", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ invoice: state.invoice, layout: state.layout }),
+    });
+    if (!res.ok) throw new Error(
+      (await res.json().catch(() => ({}))).detail || "Lỗi tạo Excel");
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = state.layout === "flat" ? "du_lieu_phang.xlsx" : "ket_qua.xlsx";
+    a.click();
+    renderResult();
+  } catch (e) {
+    setError("Không tạo được Excel", e.message);
+  }
 }
 
 // ---------- wiring ----------
@@ -209,6 +254,19 @@ $("changeBtn").addEventListener("click", () => fi.click());
 $("sampleBtn").addEventListener("click", loadSample);
 $("downloadBtn").addEventListener("click", download);
 $("menuToggle").addEventListener("click", () => $("sidebar").classList.toggle("open"));
+
+document.querySelectorAll("[data-mode]").forEach(b =>
+  b.addEventListener("click", () => {
+    state.mode = b.dataset.mode;
+    document.querySelectorAll("[data-mode]").forEach(x =>
+      x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+  }));
+document.querySelectorAll("[data-layout]").forEach(b =>
+  b.addEventListener("click", () => {
+    state.layout = b.dataset.layout;
+    document.querySelectorAll("[data-layout]").forEach(x =>
+      x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+  }));
 
 // First screen shows the product working, not an empty box.
 loadSample();

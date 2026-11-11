@@ -65,7 +65,16 @@
         <p class="sub" id="finding">Chưa có chứng từ nào. Tải PDF hoặc ảnh lên để bắt đầu.</p>
       </div>
       <div class="actions">
+        <div class="segmented" role="group" aria-label="Chế độ đọc">
+          <button data-mode="auto" aria-pressed="true">Tự động</button>
+          <button data-mode="text" aria-pressed="false">Nhanh</button>
+          <button data-mode="vision" aria-pressed="false">Chính xác</button>
+        </div>
         <button class="btn" id="sampleBtn">Hóa đơn mẫu</button>
+        <div class="segmented" role="group" aria-label="Kiểu xuất">
+          <button data-layout="template" aria-pressed="true">Mẫu HĐ</button>
+          <button data-layout="flat" aria-pressed="false">Dữ liệu phẳng</button>
+        </div>
         <button class="btn primary" id="downloadBtn" disabled>
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v8m0 0L5 7m3 3 3-3M3 13.5h10" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Tải Excel
