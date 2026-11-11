@@ -26,4 +26,6 @@ PoC pipeline: PDF/ảnh -> text layer hoặc vision -> Gemini -> JSON (Pydantic)
 - Modes: auto|text|vision (param trên endpoints + segmented UI). Layout Excel: template|flat.
 - Warnings là objects {message, severity(critical|check|info), field} — không phải strings.
 - Log trích xuất: `logs/extractions.jsonl` (gitignored), xem qua `/stats`.
+- Persistence: `db.py` SQLite (`data/app.db`) + uploads (`data/uploads/`, gitignored). History API: GET/DELETE `/history/{id}`, `/history/{id}/xlsx`, `/preview.png`, `/retry`. Batch: `POST /extract/batch` (max 10).
+- Dev không cần AI: `LLM_PROVIDER=mock ./venv/bin/uvicorn app:app` trả invoice giả.
 - E2E verified 11/11/2026: cả 2 mode (text + vision) trích đúng 100% trên hóa đơn mẫu.

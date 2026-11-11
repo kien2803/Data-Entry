@@ -6,3 +6,4 @@ samples/
 venv/
 *.xlsx
 logs/
+data/

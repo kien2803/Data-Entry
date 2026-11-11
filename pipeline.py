@@ -183,6 +183,26 @@ Trường hợp khó:
 
 LLM_TIMEOUT_S = 90
 
+# LLM provider: "gemini" (default) or "mock" — mock returns a canned invoice
+# so backend features can be developed/tested while the API is unavailable.
+PROVIDER = os.environ.get("LLM_PROVIDER", "gemini")
+
+
+def _mock_invoice() -> Invoice:
+    return Invoice(
+        ky_hieu="1C25TAA", so_hoa_don="MOCK-001", ngay_lap="11/11/2026",
+        ten_don_vi_ban="MOCK PROVIDER (không phải dữ liệu thật)",
+        ma_so_thue_ban="0101248141",
+        ten_don_vi_mua="CÔNG TY CỔ PHẦN XYZ", ma_so_thue_mua="0100109106",
+        hinh_thuc_thanh_toan="Chuyển khoản",
+        items=[InvoiceItem(ten_hang="Dữ liệu giả từ mock provider",
+                           don_vi_tinh="Cái", so_luong=1, don_gia=1000000,
+                           thanh_tien=1000000)],
+        tong_tien_hang=1000000, thue_suat=10, tien_thue=100000,
+        tong_thanh_toan=1100000,
+        so_tien_bang_chu="Một triệu một trăm nghìn đồng",
+    )
+
 
 def get_client() -> genai.Client:
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -224,22 +244,25 @@ def _missing_required(inv: Invoice) -> list[str]:
 def extract_invoice(path: str | Path, mode: str = "auto") -> ExtractionResult:
     """Full pipeline for one file. mode: auto | text | vision."""
     effective_mode, contents = build_contents(path, mode)
-    client = get_client()
 
     t0 = time.monotonic()
-    invoice = _call_llm(client, contents)
+    if PROVIDER == "mock":
+        invoice = _mock_invoice()
+    else:
+        client = get_client()
+        invoice = _call_llm(client, contents)
 
-    if invoice is not None and _missing_required(invoice):
-        log.info("missing required fields %s — retrying",
-                 _missing_required(invoice))
-        invoice = None
+        if invoice is not None and _missing_required(invoice):
+            log.info("missing required fields %s — retrying",
+                     _missing_required(invoice))
+            invoice = None
 
-    if invoice is None:
-        # one retry, nudged: remind the model about required fields
-        retry_contents = [*contents,
-                          "Nhắc lại: bắt buộc có so_hoa_don và "
-                          "tong_thanh_toan trong JSON trả về."]
-        invoice = _call_llm(client, retry_contents)
+        if invoice is None:
+            # one retry, nudged: remind the model about required fields
+            retry_contents = [*contents,
+                              "Nhắc lại: bắt buộc có so_hoa_don và "
+                              "tong_thanh_toan trong JSON trả về."]
+            invoice = _call_llm(client, retry_contents)
 
     duration_ms = int((time.monotonic() - t0) * 1000)
 

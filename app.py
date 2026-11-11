@@ -13,7 +13,9 @@ Run: uvicorn app:app --reload
 """
 
 import base64
+import json
 import tempfile
+import uuid
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -24,10 +26,13 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import db
 from pipeline import (IMAGE_EXTS, Invoice, InvoiceItem, TaxLine,
                       extract_invoice, log_extraction,
                       read_extraction_stats, validate_invoice,
                       write_excel, write_excel_flat)
+
+db.init_db()
 
 app = FastAPI(title="DocLift — trích xuất chứng từ")
 
@@ -100,15 +105,27 @@ def _check_file_opens(ext: str, data: bytes):
             400, "File không đọc được — file hỏng hoặc sai định dạng.")
 
 
-def _run_extraction(ext: str, data: bytes, mode: str):
+def _store_upload(ext: str, data: bytes) -> Path:
+    stored = db.UPLOAD_DIR / f"{uuid.uuid4().hex}{ext}"
+    stored.write_bytes(data)
+    return stored
+
+
+def _run_extraction(ext: str, data: bytes, mode: str,
+                    file_name: str = "?"):
+    """Persist the upload + outcome row, return (ExtractionResult, row_id)."""
     _check_file_opens(ext, data)
-    with tempfile.TemporaryDirectory() as tmp:
-        src = Path(tmp) / f"input{ext}"
-        src.write_bytes(data)
-        try:
-            return extract_invoice(src, mode)
-        except RuntimeError as e:
-            raise HTTPException(500, str(e))
+    stored = _store_upload(ext, data)
+    try:
+        result = extract_invoice(stored, mode)
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+    eid = db.save_extraction(
+        file_name=file_name, stored_path=stored, mode=result.mode, ok=True,
+        duration_ms=result.duration_ms,
+        invoice=result.invoice.model_dump(),
+        warnings=[w.model_dump() for w in result.warnings])
+    return result, eid
 
 
 def _meta(file_name: str, result) -> dict:
@@ -126,14 +143,14 @@ def extract(file: UploadFile = File(...), mode: str = Form("auto"),
         raise HTTPException(400, f"layout phải là: {sorted(LAYOUTS)}")
     ext, data = _read_upload(file)
     try:
-        result = _run_extraction(ext, data, mode)
+        result, eid = _run_extraction(ext, data, mode, file.filename or "?")
     except HTTPException as e:
         log_extraction({"file": file.filename, "mode": mode, "ok": False,
                         "error": str(e.detail)})
         raise
     log_extraction({"file": file.filename, "mode": result.mode, "ok": True,
                     "warnings": len(result.warnings),
-                    "duration_ms": result.duration_ms})
+                    "duration_ms": result.duration_ms, "id": eid})
     soft = [w for w in result.warnings if w.severity != "info"]
     resp = _write_and_stream(result.invoice, result.warnings,
                              _meta(file.filename or "?", result),
@@ -150,19 +167,20 @@ def extract_json(file: UploadFile = File(...), mode: str = Form("auto")):
         raise HTTPException(400, f"mode phải là: {sorted(MODES)}")
     ext, data = _read_upload(file)
     try:
-        result = _run_extraction(ext, data, mode)
+        result, eid = _run_extraction(ext, data, mode, file.filename or "?")
     except HTTPException as e:
         log_extraction({"file": file.filename, "mode": mode, "ok": False,
                         "error": str(e.detail)})
         raise
     log_extraction({"file": file.filename, "mode": result.mode, "ok": True,
                     "warnings": len(result.warnings),
-                    "duration_ms": result.duration_ms})
+                    "duration_ms": result.duration_ms, "id": eid})
     return {"invoice": result.invoice.model_dump(),
             "warnings": [w.model_dump() for w in result.warnings],
             "mode": result.mode,
             "duration_ms": result.duration_ms,
             "file_name": file.filename,
+            "extraction_id": eid,
             "preview_b64": _pdf_preview_b64(data) if ext == ".pdf" else None}
 
 
@@ -238,6 +256,124 @@ def stats():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------- history
+
+@app.get("/history")
+def history(limit: int = Query(50, le=200)):
+    return {"items": db.list_extractions(limit)}
+
+
+def _get_row_or_404(eid: int) -> dict:
+    row = db.get_extraction(eid)
+    if not row:
+        raise HTTPException(404, f"Không có extraction #{eid}")
+    return row
+
+
+@app.get("/history/{eid}")
+def history_detail(eid: int):
+    row = _get_row_or_404(eid)
+    return {"id": row["id"], "file_name": row["file_name"],
+            "mode": row["mode"], "ok": row["ok"],
+            "duration_ms": row["duration_ms"],
+            "created_at": row["created_at"],
+            "invoice": json.loads(row["invoice_json"])
+                if row["invoice_json"] else None,
+            "warnings": json.loads(row["warnings_json"])
+                if row["warnings_json"] else [],
+            "error": row["error"]}
+
+
+@app.get("/history/{eid}/xlsx")
+def history_xlsx(eid: int, layout: str = Query("template")):
+    """Re-export xlsx from a stored extraction — no LLM call needed."""
+    if layout not in LAYOUTS:
+        raise HTTPException(400, f"layout phải là: {sorted(LAYOUTS)}")
+    row = _get_row_or_404(eid)
+    if not row["invoice_json"]:
+        raise HTTPException(400, "Extraction này thất bại, không có dữ liệu")
+    invoice = Invoice.model_validate_json(row["invoice_json"])
+    warnings = validate_invoice(invoice)
+    meta = {"file": row["file_name"], "mode": row["mode"],
+            "extracted_at": row["created_at"], "source": f"history #{eid}"}
+    return _write_and_stream(invoice, warnings, meta, layout, "ket_qua.xlsx")
+
+
+@app.get("/history/{eid}/preview.png")
+def history_preview(eid: int):
+    row = _get_row_or_404(eid)
+    path = Path(row["stored_path"])
+    if not path.exists():
+        raise HTTPException(404, "File gốc không còn tồn tại")
+    if path.suffix.lower() == ".pdf":
+        doc = pymupdf.open(path)
+        png = doc[0].get_pixmap(dpi=110).tobytes("png")
+        doc.close()
+        return Response(png, media_type="image/png")
+    return FileResponse(path)
+
+
+@app.post("/history/{eid}/retry")
+def history_retry(eid: int, mode: str = Query("auto")):
+    """Re-run extraction on the stored file — useful when the LLM was down."""
+    if mode not in MODES:
+        raise HTTPException(400, f"mode phải là: {sorted(MODES)}")
+    row = _get_row_or_404(eid)
+    path = Path(row["stored_path"])
+    if not path.exists():
+        raise HTTPException(404, "File gốc không còn tồn tại")
+    try:
+        result = extract_invoice(path, mode)
+    except RuntimeError as e:
+        db.update_extraction(eid, ok=False, error=str(e))
+        raise HTTPException(500, str(e))
+    db.update_extraction(
+        eid, ok=True, duration_ms=result.duration_ms,
+        invoice=result.invoice.model_dump(),
+        warnings=[w.model_dump() for w in result.warnings])
+    return {"ok": True, "mode": result.mode,
+            "duration_ms": result.duration_ms,
+            "warnings": len(result.warnings)}
+
+
+@app.delete("/history/{eid}")
+def history_delete(eid: int):
+    row = db.delete_extraction(eid)
+    if not row:
+        raise HTTPException(404, f"Không có extraction #{eid}")
+    Path(row["stored_path"]).unlink(missing_ok=True)
+    return {"deleted": eid}
+
+
+# ---------------------------------------------------------------- batch
+
+MAX_BATCH = 10
+
+
+@app.post("/extract/batch")
+def extract_batch(files: list[UploadFile] = File(...),
+                  mode: str = Form("auto")):
+    """Process several files; per-file errors don't abort the batch."""
+    if mode not in MODES:
+        raise HTTPException(400, f"mode phải là: {sorted(MODES)}")
+    if len(files) > MAX_BATCH:
+        raise HTTPException(400, f"Tối đa {MAX_BATCH} file mỗi lần")
+    results = []
+    for f in files:
+        try:
+            ext, data = _read_upload(f)
+            result, eid = _run_extraction(ext, data, mode, f.filename or "?")
+            results.append({"file": f.filename, "ok": True, "id": eid,
+                            "mode": result.mode,
+                            "warnings": len(result.warnings)})
+        except HTTPException as e:
+            results.append({"file": f.filename, "ok": False,
+                            "error": str(e.detail)})
+    done = sum(1 for r in results if r["ok"])
+    return {"total": len(results), "ok": done,
+            "failed": len(results) - done, "results": results}
 
 
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
