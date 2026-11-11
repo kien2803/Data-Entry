@@ -14,7 +14,8 @@ PoC pipeline: PDF/ảnh -> text layer hoặc vision -> Gemini -> JSON (Pydantic)
 
 - `pipeline.py` — lõi: `build_contents` (text vs vision), `extract_invoice`, `validate_invoice`, `write_excel`
 - `cli.py` — chạy 1 file từ terminal
-- `app.py` — FastAPI endpoint
+- `app.py` — FastAPI: `/extract` (xlsx), `/extract/json` (JSON + preview_b64), `/sample*` (demo không cần key), mount `web/` tại `/`
+- `web/` — UI tĩnh (index.html + app.css + app.js), style "achromatic-ledger" (taste-skill): ground #f2f4f7, Geist + Geist Mono cho số liệu, accent #1d5fbf chỉ trên tổng tiền
 - `sample_invoice.py` — sinh PDF test có text layer tiếng Việt
 
 ## Notes

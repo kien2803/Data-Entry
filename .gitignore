@@ -1,6 +1,7 @@
-venv/
-__pycache__/
 .env
-*.xlsx
-samples/
 output/
+__pycache__/
+samples/
+.taste-skill/
+venv/
+*.xlsx

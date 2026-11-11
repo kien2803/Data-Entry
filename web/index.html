@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DocLift — Trích xuất chứng từ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;700&family=Geist+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <!-- mark: a document whose lines become table cells -->
+      <svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.6">
+        <rect x="4" y="2.5" width="14" height="17" rx="2"/>
+        <path d="M7.5 7h7M7.5 10h7"/>
+        <path d="M7.5 13.5h3v3h-3zM11.5 13.5h3v3h-3z"/>
+      </svg>
+      <span class="name">DocLift</span>
+    </div>
+    <div class="workspace">Không gian làm việc: Demo</div>
+
+    <div class="group-label">Làm việc</div>
+    <a class="nav-item" aria-current="page">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor"><path d="M8 2v8m0 0L5 7m3 3 3-3M3 13h10" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Trích xuất
+    </a>
+    <a class="nav-item">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 1.5" stroke-linecap="round"/></svg>
+      Lịch sử
+    </a>
+    <a class="nav-item">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/><path d="M3 7h10M7 7v6"/></svg>
+      Mẫu chứng từ
+      <span class="pill">Sắp có</span>
+    </a>
+
+    <div class="group-label">Hệ thống</div>
+    <a class="nav-item">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor"><circle cx="8" cy="8" r="2"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2M3.8 3.8l1.4 1.4M10.8 10.8l1.4 1.4M12.2 3.8l-1.4 1.4M5.2 10.8l-1.4 1.4" stroke-linecap="round"/></svg>
+      Cài đặt
+    </a>
+
+    <div class="bottom">
+      <div class="avatar">KT</div>
+      <div class="who"><b>Kế toán viên</b><span>Bản demo</span></div>
+    </div>
+  </aside>
+
+  <main class="canvas">
+    <div class="topbar">
+      <button class="btn menu-toggle" id="menuToggle" aria-label="Menu">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" width="16"><path d="M2 4h12M2 8h12M2 12h12" stroke-linecap="round"/></svg>
+      </button>
+      <b>DocLift</b>
+    </div>
+
+    <div class="title-row">
+      <div>
+        <h1>Trích xuất hóa đơn</h1>
+        <p class="sub" id="finding">Chưa có chứng từ nào. Tải PDF hoặc ảnh lên để bắt đầu.</p>
+      </div>
+      <div class="actions">
+        <button class="btn" id="sampleBtn">Hóa đơn mẫu</button>
+        <button class="btn primary" id="downloadBtn" disabled>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v8m0 0L5 7m3 3 3-3M3 13.5h10" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Tải Excel
+        </button>
+      </div>
+    </div>
+
+    <div class="grid">
+
+      <section class="panel span5">
+        <header>
+          <h2>Chứng từ gốc</h2>
+          <span class="meta" id="docMeta"></span>
+        </header>
+        <div class="dropzone" id="dropzone" role="button" tabindex="0">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 16V4m0 0L7 9m5-5 5 5" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke-linecap="round"/></svg>
+          <div><b>Kéo thả PDF hoặc ảnh vào đây</b><br>hoặc bấm để chọn file</div>
+          <div class="chips">
+            <span class="pill">Hóa đơn GTGT</span>
+            <span class="pill">PDF</span>
+            <span class="pill">Ảnh scan</span>
+          </div>
+          <div class="hint">PDF, PNG, JPG · tối đa 15 MB</div>
+          <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg,.webp" hidden>
+        </div>
+        <div id="docWrap" hidden>
+          <div class="docview" id="docview"></div>
+          <div class="filecard">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor"><path d="M4 2h5l3 3v9H4z" stroke-linejoin="round"/><path d="M9 2v3h3"/></svg>
+            <span class="name" id="fileName"></span>
+            <button class="btn" id="changeBtn">Đổi file</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel span7">
+        <header>
+          <h2>Dữ liệu trích xuất</h2>
+          <div class="statusline" id="statusPills"></div>
+        </header>
+        <div id="resultBody">
+          <div class="empty">
+            <div><b>Các trường sẽ được trích xuất tự động</b></div>
+            <div class="fields">
+              <span class="pill">Số hóa đơn</span>
+              <span class="pill">Ký hiệu</span>
+              <span class="pill">Ngày lập</span>
+              <span class="pill">Đơn vị bán</span>
+              <span class="pill">MST hai bên</span>
+              <span class="pill">Bảng hàng hóa</span>
+              <span class="pill">Thuế GTGT</span>
+              <span class="pill">Tổng thanh toán</span>
+            </div>
+            <div class="hint">Kết quả hiện ở đây. Hệ thống tự kiểm tra<br>MST và cộng tiền, bạn chỉ cần rà soát.</div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
