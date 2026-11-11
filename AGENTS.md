@@ -22,4 +22,5 @@ PoC pipeline: PDF/ảnh -> text layer hoặc vision -> Gemini -> JSON (Pydantic)
 
 - PDF có text layer (>100 ký tự) -> gửi text; scan/ảnh -> render PNG gửi Gemini vision. Không dùng OCR riêng ở MVP.
 - Checksum MST VN: weights [31,29,23,19,17,13,7,5,3], check = (10 - sum%11) % 10.
-- Model: gemini-2.5-flash, structured output bằng Pydantic schema `Invoice`.
+- Model: gemini-3.8-flash, structured output bằng Pydantic schema `Invoice`. (gemini-2.5-flash đã ngừng hỗ trợ user mới)
+- E2E verified 11/11/2026: cả 2 mode (text + vision) trích đúng 100% trên hóa đơn mẫu.

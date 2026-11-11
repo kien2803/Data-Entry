@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-MODEL = "gemini-2.5-flash"
+MODEL = "gemini-3.8-flash"
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 MIME_BY_EXT = {
     ".png": "image/png",
