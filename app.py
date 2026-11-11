@@ -12,6 +12,7 @@ Run: uvicorn app:app --reload
 import base64
 import tempfile
 from pathlib import Path
+from urllib.parse import quote
 
 import pymupdf
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -76,7 +77,21 @@ async def _read_upload(file: UploadFile) -> tuple[str, bytes]:
     return ext, data
 
 
+def _check_file_opens(ext: str, data: bytes):
+    """Reject corrupt/truncated files with a friendly 400 before the LLM call."""
+    try:
+        # pymupdf opens both PDFs and single-page image files; open() alone
+        # doesn't decode image data, so render a tiny pixmap to prove it
+        doc = pymupdf.open(stream=data, filetype=ext.lstrip("."))
+        doc[0].get_pixmap(dpi=10)
+        doc.close()
+    except Exception:
+        raise HTTPException(
+            400, "File không đọc được — file hỏng hoặc sai định dạng.")
+
+
 def _run_extraction(ext: str, data: bytes) -> tuple[Invoice, list[str]]:
+    _check_file_opens(ext, data)
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / f"input{ext}"
         src.write_bytes(data)
@@ -93,7 +108,7 @@ async def extract(file: UploadFile = File(...)):
     soft = [w for w in warnings if not w.startswith("mode=")]
     resp = _xlsx_response(invoice, warnings, "ket_qua.xlsx")
     if soft:
-        resp.headers["X-Extraction-Warnings"] = "; ".join(soft)
+        resp.headers["X-Extraction-Warnings"] = quote("; ".join(soft))
     return resp
 
 

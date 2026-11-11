@@ -72,13 +72,17 @@ def extract_text_from_pdf(path: str | Path) -> str:
         doc.close()
 
 
+MAX_VISION_PAGES = 5
+
+
 def pdf_to_page_images(path: str | Path, dpi: int = 200) -> list[bytes]:
-    """Render each PDF page to PNG bytes (for scanned PDFs -> Gemini vision)."""
+    """Render PDF pages to PNG bytes (for scanned PDFs -> Gemini vision).
+    Capped so a large scan cannot blow up token usage."""
     doc = fitz.open(path)
     try:
         return [
             page.get_pixmap(dpi=dpi).tobytes("png")
-            for page in doc
+            for page in doc[:MAX_VISION_PAGES]
         ]
     finally:
         doc.close()
